@@ -1,0 +1,17 @@
+[Unit]
+Description=Agent Pod Lab Father Agent (Claude Code)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/agent-pod-lab
+ExecStart=/usr/local/bin/claude --dangerously-skip-permissions --prompt-file /root/agent-pod-lab/prompts/father-prompt.md
+Restart=on-failure
+RestartSec=30
+EnvironmentFile=/root/agent-pod-lab/.env
+Environment=PATH=/root/.local/bin:/usr/local/bin:/usr/bin:/bin
+
+[Install]
+WantedBy=multi-user.target

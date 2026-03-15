@@ -1,0 +1,10 @@
+experiments:
+  - name: baseline
+    script: experiments/baseline/train.py
+    dependencies: []
+    tags: [baseline, phase-1]
+
+  - name: lr-sweep-low
+    script: experiments/lr-sweep-low/train.py
+    dependencies: [baseline]
+    tags: [lr-sweep, phase-1]
