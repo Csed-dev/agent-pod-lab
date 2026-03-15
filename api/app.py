@@ -23,8 +23,8 @@ if cors_origins:
     app.add_middleware(
         CORSMiddleware,
         allow_origins=[o.strip() for o in cors_origins.split(",")],
-        allow_credentials=True,
-        allow_methods=["*"],
+        allow_credentials=False,
+        allow_methods=["GET"],
         allow_headers=["*"],
     )
 
