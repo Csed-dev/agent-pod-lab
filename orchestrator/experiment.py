@@ -236,6 +236,17 @@ class ExperimentManager:
             readme_path=readme_path,
         )
 
+    def _get_or_reconnect(self, instance_id: str) -> Connection | None:
+        conn = self._active_conns.get(instance_id)
+        if conn:
+            return conn
+        try:
+            conn = self._compute.wait_until_ready(instance_id)
+            self._active_conns[instance_id] = conn
+            return conn
+        except Exception:
+            return None
+
     def finish(self, experiment_name: str, exit_code: int, output: str) -> None:
         if experiment_name not in self._spec_map:
             raise ExperimentNotFoundError(experiment_name, list(self._spec_map.keys()))
@@ -260,16 +271,19 @@ class ExperimentManager:
         save_experiment_result(self._results_dir, state.run_id, state, output, metrics)
 
         if state.instance_id:
-            conn = self._active_conns.get(state.instance_id)
+            conn = self._get_or_reconnect(state.instance_id)
             if conn:
-                gpu_util = self._compute.run_command(
-                    conn,
-                    "nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>/dev/null || echo -1",
-                    timeout=10,
-                )
-                util_val = float(gpu_util.strip())
-                if util_val >= 0:
-                    state.gpu_utilization_pct = util_val
+                try:
+                    gpu_util = self._compute.run_command(
+                        conn,
+                        "nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>/dev/null || echo -1",
+                        timeout=10,
+                    )
+                    util_val = float(gpu_util.strip())
+                    if util_val >= 0:
+                        state.gpu_utilization_pct = util_val
+                except Exception:
+                    pass
 
             self._compute.terminate_instance(state.instance_id)
             self._active_conns.pop(state.instance_id, None)
