@@ -428,7 +428,7 @@ class ExperimentManager:
         from orchestrator.models import _load_experiment_readme
         readme = _load_experiment_readme(script)
 
-        command = f"cd {{workspace}} && uv run {script}"
+        command = f"cd {{workspace}} && PYTHONPATH={{workspace}} uv run python {script}"
 
         spec = ExperimentSpec(
             name=name,
@@ -521,15 +521,27 @@ class ExperimentManager:
             changed = False
             for spec in self._specs:
                 state = self._states[spec.name]
-                if state.status != ExperimentStatus.PENDING:
-                    continue
-                for dep in spec.dependencies:
-                    dep_status = self._states[dep].status
-                    if dep_status in (ExperimentStatus.FAILED, ExperimentStatus.BLOCKED):
-                        state.status = ExperimentStatus.BLOCKED
-                        state.error = f"Blocked by failed dependency: {dep}"
+                if state.status == ExperimentStatus.PENDING:
+                    # Block if any dep is failed or blocked
+                    for dep in spec.dependencies:
+                        dep_status = self._states[dep].status
+                        if dep_status in (ExperimentStatus.FAILED, ExperimentStatus.BLOCKED):
+                            state.status = ExperimentStatus.BLOCKED
+                            state.error = f"Blocked by failed dependency: {dep}"
+                            changed = True
+                            break
+                elif state.status == ExperimentStatus.BLOCKED:
+                    # Unblock if all deps are now completed or pending/running
+                    has_failed_dep = False
+                    for dep in spec.dependencies:
+                        dep_status = self._states[dep].status
+                        if dep_status in (ExperimentStatus.FAILED, ExperimentStatus.BLOCKED):
+                            has_failed_dep = True
+                            break
+                    if not has_failed_dep:
+                        state.status = ExperimentStatus.PENDING
+                        state.error = None
                         changed = True
-                        break
 
     def _persist(self) -> None:
         save_state(self._state_path, self._states)
