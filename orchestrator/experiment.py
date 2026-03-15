@@ -32,14 +32,15 @@ from orchestrator.models import (
     save_state,
     save_train_snapshot,
 )
-from orchestrator.notification import SmtpConfig, send_experiment_notification
-from orchestrator.pod import PodConnection, PodManager
+from orchestrator.ports.compute import ComputePort, Connection
+from orchestrator.ports.notification import NotificationPort
+from orchestrator.ports.storage import CloudSyncPort
 
 
 @dataclass(frozen=True)
 class ExperimentStartResult:
-    pod_id: str
-    ssh_command: str
+    instance_id: str
+    exec_command: str
     run_id: str
     experiment_name: str
     description: str
@@ -57,7 +58,7 @@ class ExperimentStartResult:
             f"<description>{self.description}</description>\n"
             f"<hypothesis>{self.hypothesis}</hypothesis>\n"
             f"<acceptance>\n{acceptance_str}\n</acceptance>\n"
-            f"<ssh-command>\n{self.ssh_command}\n</ssh-command>\n"
+            f"<ssh-command>\n{self.exec_command}\n</ssh-command>\n"
             f"<interpretation-path>{self.interpretation_path}</interpretation-path>\n"
             f"<readme-path>{self.readme_path}</readme-path>\n"
             f"</task>"
@@ -65,14 +66,36 @@ class ExperimentStartResult:
 
 
 class ExperimentManager:
-    def __init__(self, experiments_path: str, config_path: str, state_path: str = "scheduler_state.json"):
+    def __init__(
+        self,
+        experiments_path: str,
+        config_path: str,
+        state_path: str = "scheduler_state.json",
+        compute: ComputePort | None = None,
+        cloud_sync: CloudSyncPort | None = None,
+        notifier: NotificationPort | None = None,
+    ):
         self._config = SchedulerConfig.from_yaml(config_path)
         self._experiments_path = experiments_path
         self._specs = load_experiments(experiments_path)
         self._spec_map = {s.name: s for s in self._specs}
         self._state_path = Path(state_path)
         self._results_dir = Path(self._config.results_dir)
-        self._pm = PodManager()
+
+        if compute is None:
+            from orchestrator.adapters.runpod import RunPodCompute
+            compute = RunPodCompute()
+        self._compute = compute
+
+        self._cloud_sync = cloud_sync
+        self._notifier = notifier
+
+        if self._notifier is None:
+            from orchestrator.adapters.smtp import SmtpConfig
+            smtp_config = SmtpConfig.from_yaml(config_path)
+            if smtp_config:
+                from orchestrator.adapters.smtp import SmtpNotifier
+                self._notifier = SmtpNotifier(smtp_config)
 
         self._states: dict[str, ExperimentState] = {}
         if self._state_path.exists():
@@ -82,8 +105,7 @@ class ExperimentManager:
             if spec.name not in self._states:
                 self._states[spec.name] = ExperimentState(name=spec.name)
 
-        self._active_pods: dict[str, PodConnection] = {}
-        self._smtp_config = SmtpConfig.from_yaml(config_path)
+        self._active_conns: dict[str, Connection] = {}
 
     def validate_experiments(self) -> str:
         issues = []
@@ -149,10 +171,15 @@ class ExperimentManager:
         effective_gpu = gpu_type or spec.gpu_type or self._config.gpu_type
 
         try:
-            pod_id = self._pm.create_pod(f"exp-{experiment_name}", gpu_type=effective_gpu)
+            instance_id = self._compute.create_instance(
+                f"exp-{experiment_name}",
+                gpu_type=effective_gpu,
+                image=self._config.image,
+                disk_gb=self._config.container_disk_gb,
+            )
         except Exception as e:
             if "no longer any instances" in str(e).lower() or "does not have the resources" in str(e).lower():
-                gpus = self._pm.get_available_gpus()
+                gpus = self._compute.available_gpus()
                 top5 = "\n".join(f"  {g['id']:40s} {g['memory_gb']:>4}GB  ${g['price_per_hr']:.2f}/hr" for g in gpus[:5])
                 raise GpuUnavailableError(effective_gpu, f"Cheapest available:\n{top5}") from e
             raise
@@ -161,7 +188,7 @@ class ExperimentManager:
 
         state.status = ExperimentStatus.RUNNING
         state.run_id = run_id
-        state.pod_id = pod_id
+        state.instance_id = instance_id
         state.gpu_type_used = effective_gpu
         state.started_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
         self._persist()
@@ -170,20 +197,23 @@ class ExperimentManager:
         save_train_snapshot(self._results_dir, run_id, spec.script)
 
         try:
-            conn = self._pm.wait_until_ready(pod_id)
-            self._active_pods[pod_id] = conn
+            conn = self._compute.wait_until_ready(instance_id)
+            self._active_conns[instance_id] = conn
 
             workspace = self._config.workspace_dir
-            self._pm.ssh_run(conn, self._config.setup_command.format(workspace=workspace),
-                             timeout=self._config.setup_timeout)
+            self._compute.run_command(
+                conn,
+                self._config.setup_command.format(workspace=workspace),
+                timeout=self._config.setup_timeout,
+            )
 
             if spec.script:
-                self._pm.scp_to_pod(conn, spec.script, f"{workspace}/train.py")
+                self._compute.upload_file(conn, spec.script, f"{workspace}/train.py")
         except Exception:
-            self._pm.terminate_pod(pod_id)
+            self._compute.terminate_instance(instance_id)
             state.status = ExperimentStatus.PENDING
             state.run_id = ""
-            state.pod_id = None
+            state.instance_id = None
             state.gpu_type_used = None
             state.started_at = None
             self._persist()
@@ -192,11 +222,11 @@ class ExperimentManager:
         command = spec.command.format(workspace=workspace)
         timeout = spec.timeout or self._config.experiment_timeout
 
-        ssh_command = self._build_ssh_command(conn, command, timeout)
+        exec_command = self._compute.build_exec_command(conn, command, timeout)
         readme_path = str(Path(spec.script).parent / "README.md") if spec.script else ""
         return ExperimentStartResult(
-            pod_id=pod_id,
-            ssh_command=ssh_command,
+            instance_id=instance_id,
+            exec_command=exec_command,
             run_id=run_id,
             experiment_name=experiment_name,
             description=spec.description,
@@ -223,25 +253,31 @@ class ExperimentManager:
         metrics = _extract_metrics(output)
 
         if state.gpu_type_used and state.started_at and state.finished_at:
-            state.cost_usd = estimate_cost(state.gpu_type_used, state.started_at, state.finished_at)
+            prices = self._compute.gpu_prices()
+            price_per_hour = prices.get(state.gpu_type_used, 0.0)
+            state.cost_usd = estimate_cost(price_per_hour, state.started_at, state.finished_at)
 
         save_experiment_result(self._results_dir, state.run_id, state, output, metrics)
 
-        if state.pod_id:
-            conn = self._active_pods.get(state.pod_id)
+        if state.instance_id:
+            conn = self._active_conns.get(state.instance_id)
             if conn:
-                gpu_util = self._pm.ssh_run(conn, "nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>/dev/null || echo -1", timeout=10)
+                gpu_util = self._compute.run_command(
+                    conn,
+                    "nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>/dev/null || echo -1",
+                    timeout=10,
+                )
                 util_val = float(gpu_util.strip())
                 if util_val >= 0:
                     state.gpu_utilization_pct = util_val
 
-            self._pm.terminate_pod(state.pod_id)
-            self._active_pods.pop(state.pod_id, None)
+            self._compute.terminate_instance(state.instance_id)
+            self._active_conns.pop(state.instance_id, None)
 
         self._sync_to_cloud(state.run_id, metrics)
 
-        if self._smtp_config:
-            send_experiment_notification(self._smtp_config, state, metrics)
+        if self._notifier:
+            self._notifier.notify(state, metrics)
 
         self._propagate_blocked()
         self._persist()
@@ -252,14 +288,16 @@ class ExperimentManager:
         state = self._states[experiment_name]
         if state.status != ExperimentStatus.RUNNING:
             return f"Experiment '{experiment_name}' is not running (status: {state.status.value})."
-        if state.pod_id:
-            self._pm.terminate_pod(state.pod_id)
-            self._active_pods.pop(state.pod_id, None)
+        if state.instance_id:
+            self._compute.terminate_instance(state.instance_id)
+            self._active_conns.pop(state.instance_id, None)
         state.status = ExperimentStatus.FAILED
         state.error = "Cancelled by user"
         state.finished_at = datetime.datetime.now(datetime.timezone.utc).isoformat()
         if state.gpu_type_used and state.started_at and state.finished_at:
-            state.cost_usd = estimate_cost(state.gpu_type_used, state.started_at, state.finished_at)
+            prices = self._compute.gpu_prices()
+            price_per_hour = prices.get(state.gpu_type_used, 0.0)
+            state.cost_usd = estimate_cost(price_per_hour, state.started_at, state.finished_at)
         self._propagate_blocked()
         self._persist()
         return f"Experiment '{experiment_name}' cancelled. Pod terminated."
@@ -437,36 +475,36 @@ class ExperimentManager:
         return "\n".join(lines)
 
     def available_gpus(self, min_memory_gb: int = 0) -> str:
-        gpus = self._pm.get_available_gpus(min_memory_gb)
+        gpus = self._compute.available_gpus(min_memory_gb)
         lines = ["Available GPUs:"]
         for g in gpus:
             lines.append(f"  {g['id']:45s} {g['memory_gb']:>4}GB  ${g['price_per_hr']:.2f}/hr")
         return "\n".join(lines)
 
     def cleanup_orphaned_pods(self) -> str:
-        pods = self._pm.list_pods()
-        running_pod_ids = {s.pod_id for s in self._states.values()
-                          if s.status == ExperimentStatus.RUNNING and s.pod_id}
-        orphans = [p for p in pods if p.status in ("RUNNING", "STARTING")
-                   and p.pod_id not in running_pod_ids]
+        instances = self._compute.list_instances()
+        running_ids = {s.instance_id for s in self._states.values()
+                       if s.status == ExperimentStatus.RUNNING and s.instance_id}
+        orphans = [i for i in instances if i.status in ("RUNNING", "STARTING")
+                   and i.instance_id not in running_ids]
         if not orphans:
             return "No orphaned pods found."
         lines = ["Terminating orphaned pods:"]
-        for pod in orphans:
-            self._pm.terminate_pod(pod.pod_id)
-            lines.append(f"  {pod.pod_id} | {pod.name} | {pod.gpu_type} — terminated")
+        for inst in orphans:
+            self._compute.terminate_instance(inst.instance_id)
+            lines.append(f"  {inst.instance_id} | {inst.name} | {inst.gpu_type} — terminated")
         return "\n".join(lines)
 
     def reset(self, experiment_name: str) -> str:
         if experiment_name not in self._spec_map:
             raise ExperimentNotFoundError(experiment_name, list(self._spec_map.keys()))
         state = self._states[experiment_name]
-        if state.status == ExperimentStatus.RUNNING and state.pod_id:
-            self._pm.terminate_pod(state.pod_id)
-            self._active_pods.pop(state.pod_id, None)
+        if state.status == ExperimentStatus.RUNNING and state.instance_id:
+            self._compute.terminate_instance(state.instance_id)
+            self._active_conns.pop(state.instance_id, None)
         state.status = ExperimentStatus.PENDING
         state.run_id = ""
-        state.pod_id = None
+        state.instance_id = None
         state.gpu_type_used = None
         state.started_at = None
         state.finished_at = None
@@ -515,36 +553,24 @@ class ExperimentManager:
             yaml.dump(data, f, default_flow_style=False, sort_keys=False)
 
     def _sync_to_cloud(self, run_id: str, metrics: dict[str, float]) -> None:
-        import os
-        if not os.environ.get("CF_ACCOUNT_ID"):
-            return
-        from orchestrator.cloudflare_storage import D1Client, R2Client
+        if self._cloud_sync is None:
+            import os
+            if not os.environ.get("CF_ACCOUNT_ID"):
+                return
+            from orchestrator.adapters.cloudflare import CloudflareSync
+            self._cloud_sync = CloudflareSync()
+
         config_path = self._results_dir / run_id / "config.yaml"
         status_path = self._results_dir / run_id / "status.json"
         if not config_path.exists() or not status_path.exists():
             raise FileNotFoundError(f"Missing config.yaml or status.json in results/{run_id}/")
+
         with open(config_path) as f:
             config = yaml.safe_load(f)
         with open(status_path) as f:
             status_data = json.load(f)
-        d1 = D1Client()
-        d1.save_experiment(run_id, config, status_data)
-        if metrics:
-            d1.save_metrics(run_id, metrics)
-        r2 = R2Client()
-        r2.upload_experiment_files(self._results_dir, run_id)
 
-    def _build_ssh_command(self, conn: PodConnection, command: str, timeout: int) -> str:
-        inner = f"timeout {timeout} bash -c {_shell_quote(command)}"
-        return (
-            f"ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 "
-            f"-p {conn.port} root@{conn.ip} "
-            f"{_shell_quote(inner)}"
-        )
-
-
-def _shell_quote(s: str) -> str:
-    return "'" + s.replace("'", "'\"'\"'") + "'"
+        self._cloud_sync.sync_experiment(self._results_dir, run_id, config, status_data, metrics)
 
 
 def _extract_error(output: str) -> str:

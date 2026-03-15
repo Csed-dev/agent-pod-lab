@@ -47,7 +47,7 @@ class ExperimentState:
     name: str
     run_id: str = ""
     status: ExperimentStatus = ExperimentStatus.PENDING
-    pod_id: str | None = None
+    instance_id: str | None = None
     gpu_type_used: str | None = None
     started_at: str | None = None
     finished_at: str | None = None
@@ -254,7 +254,7 @@ def save_experiment_result(
         "name": state.name,
         "run_id": state.run_id,
         "status": state.status.value,
-        "pod_id": state.pod_id,
+        "instance_id": state.instance_id,
         "gpu_type_used": state.gpu_type_used,
         "started_at": state.started_at,
         "finished_at": state.finished_at,
@@ -377,7 +377,7 @@ def save_state(path: Path, experiments: dict[str, ExperimentState]) -> None:
         data[name] = {
             "run_id": state.run_id,
             "status": state.status.value,
-            "pod_id": state.pod_id,
+            "instance_id": state.instance_id,
             "gpu_type_used": state.gpu_type_used,
             "started_at": state.started_at,
             "finished_at": state.finished_at,
@@ -399,7 +399,7 @@ def load_state(path: Path) -> dict[str, ExperimentState]:
             name=name,
             run_id=s.get("run_id", ""),
             status=ExperimentStatus(s["status"]),
-            pod_id=s.get("pod_id"),
+            instance_id=s.get("instance_id") or s.get("pod_id"),
             gpu_type_used=s.get("gpu_type_used"),
             started_at=s.get("started_at"),
             finished_at=s.get("finished_at"),
@@ -411,23 +411,7 @@ def load_state(path: Path) -> dict[str, ExperimentState]:
     return states
 
 
-_gpu_price_cache: dict[str, float] = {}
-
-
-def fetch_gpu_prices() -> dict[str, float]:
-    global _gpu_price_cache
-    if _gpu_price_cache:
-        return _gpu_price_cache
-    from orchestrator.pod import PodManager
-    pm = PodManager()
-    gpus = pm.get_available_gpus(min_memory_gb=0)
-    _gpu_price_cache = {g["id"]: g["price_per_hr"] for g in gpus}
-    return _gpu_price_cache
-
-
-def estimate_cost(gpu_type: str, started_at: str, finished_at: str) -> float:
-    prices = fetch_gpu_prices()
-    price_per_hour = prices.get(gpu_type, 0.0)
+def estimate_cost(price_per_hour: float, started_at: str, finished_at: str) -> float:
     if not price_per_hour:
         return 0.0
     start = datetime.fromisoformat(started_at)

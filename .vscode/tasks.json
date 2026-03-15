@@ -1,0 +1,58 @@
+{
+  "version": "2.0.0",
+  "tasks": [
+    {
+      "label": "Setup: Install uv",
+      "type": "shell",
+      "command": "command -v uv >/dev/null && uv self update || curl -LsSf https://astral.sh/uv/install.sh | sh",
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "Setup: Create venv",
+      "type": "shell",
+      "command": "uv venv .venv --python 3.11 && uv pip install -e '.'",
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "Setup: Full",
+      "type": "shell",
+      "dependsOrder": "sequence",
+      "dependsOn": ["Setup: Install uv", "Setup: Create venv"],
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "Sync Dependencies",
+      "type": "shell",
+      "command": "uv pip install -e '.'",
+      "group": "build",
+      "presentation": { "reveal": "always", "panel": "shared" }
+    },
+    {
+      "label": "API: Dev",
+      "type": "shell",
+      "command": "uv run uvicorn api.app:app --reload --port 8000",
+      "group": "build",
+      "isBackground": true,
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    },
+    {
+      "label": "API: Production",
+      "type": "shell",
+      "command": "uv run gunicorn api.app:app",
+      "group": "build",
+      "isBackground": true,
+      "presentation": { "reveal": "always", "panel": "dedicated" }
+    },
+    {
+      "label": "Lint",
+      "type": "shell",
+      "command": "uv run ruff check .",
+      "group": "test",
+      "presentation": { "reveal": "always", "panel": "shared" },
+      "problemMatcher": []
+    }
+  ]
+}

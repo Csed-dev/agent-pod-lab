@@ -2,46 +2,46 @@ import sys
 
 sys.path.insert(0, ".")
 
-from orchestrator import PodManager
+from orchestrator.adapters.runpod import RunPodCompute
 
 
 def test_pod_lifecycle():
-    pm = PodManager()
+    compute = RunPodCompute()
 
     print("1. Checking for orphaned pods...")
-    for pod in pm.list_pods():
-        print(f"   {pod.pod_id} | {pod.name} | {pod.status} | {pod.gpu_type} | ${pod.cost_per_hr}/hr")
+    for inst in compute.list_instances():
+        print(f"   {inst.instance_id} | {inst.name} | {inst.status} | {inst.gpu_type} | ${inst.cost_per_hr}/hr")
 
     print("2. Checking available GPUs...")
-    gpus = pm.get_available_gpus(min_memory_gb=20)
+    gpus = compute.available_gpus(min_memory_gb=20)
     gpu_type = gpus[0]["id"]
     print(f"   Cheapest: {gpu_type} ${gpus[0]['price_per_hr']:.2f}/hr")
 
-    print(f"3. Creating pod ({gpu_type})...")
-    pod_id = pm.create_pod("test-lifecycle", gpu_type=gpu_type)
-    print(f"   Pod ID: {pod_id}")
+    print(f"3. Creating instance ({gpu_type})...")
+    instance_id = compute.create_instance("test-lifecycle", gpu_type=gpu_type, image="runpod/pytorch:1.0.2-cu1281-torch280-ubuntu2404", disk_gb=20)
+    print(f"   Instance ID: {instance_id}")
 
     try:
-        print("4. Waiting for pod to be ready...")
-        conn = pm.wait_until_ready(pod_id)
+        print("4. Waiting for instance to be ready...")
+        conn = compute.wait_until_ready(instance_id)
         print(f"   Connected: {conn.ip}:{conn.port}")
 
-        print("5. Testing SSH...")
-        gpu_info = pm.ssh_run(conn, "nvidia-smi --query-gpu=name,memory.total --format=csv,noheader")
+        print("5. Testing command execution...")
+        gpu_info = compute.run_command(conn, "nvidia-smi --query-gpu=name,memory.total --format=csv,noheader")
         print(f"   GPU: {gpu_info.strip()}")
 
-        python_version = pm.ssh_run(conn, "python3 --version")
+        python_version = compute.run_command(conn, "python3 --version")
         print(f"   {python_version.strip()}")
 
-        print("6. Testing SCP...")
-        pm.scp_to_pod(conn, "train.py", "/tmp/test_upload.py")
-        verify = pm.ssh_run(conn, "ls -la /tmp/test_upload.py")
+        print("6. Testing file upload...")
+        compute.upload_file(conn, "train.py", "/tmp/test_upload.py")
+        verify = compute.run_command(conn, "ls -la /tmp/test_upload.py")
         print(f"   {verify.strip()}")
 
         print("ALL TESTS PASSED")
     finally:
-        print("7. Terminating pod...")
-        pm.terminate_pod(pod_id)
+        print("7. Terminating instance...")
+        compute.terminate_instance(instance_id)
         print("   Terminated")
 
 

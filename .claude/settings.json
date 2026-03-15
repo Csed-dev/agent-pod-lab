@@ -1,0 +1,48 @@
+{
+  "permissions": {
+    "allow": [
+      "Read",
+      "Write",
+      "Glob",
+      "Grep",
+      "Agent(experiment-runner)",
+      "Bash(python3 *)",
+      "Bash(python *)",
+      "Bash(uv run *)",
+      "Bash(git status*)",
+      "Bash(git log*)",
+      "Bash(git diff*)",
+      "Bash(git add *)",
+      "Bash(git commit *)",
+      "Bash(git push *)",
+      "Bash(git pull*)",
+      "Bash(git fetch*)",
+      "Bash(cat *)",
+      "Bash(ls *)",
+      "Bash(ls)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(wc *)",
+      "Bash(mkdir *)"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(sudo *)",
+      "Bash(curl *)",
+      "Bash(wget *)",
+      "Bash(chmod 777 *)",
+      "Bash(kill -9 *)",
+      "Bash(pkill *)",
+      "Bash(shutdown *)",
+      "Bash(reboot*)",
+      "Bash(dd *)",
+      "Bash(mkfs *)",
+      "Bash(git push --force*)",
+      "Bash(git reset --hard*)",
+      "Edit",
+      "NotebookEdit",
+      "WebFetch",
+      "WebSearch"
+    ]
+  }
+}

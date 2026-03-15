@@ -1,7 +1,7 @@
 ---
 name: experiment-runner
 description: Runs a single ML experiment on a RunPod GPU pod and writes interpretation
-tools: Bash, Read, Write, Glob, Grep
+tools: Bash, Read, Write
 model: sonnet
 maxTurns: 30
 ---

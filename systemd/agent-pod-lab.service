@@ -7,7 +7,10 @@ Wants=network-online.target
 Type=simple
 User=root
 WorkingDirectory=/root/agent-pod-lab
-ExecStart=/usr/local/bin/claude --dangerously-skip-permissions --prompt-file /root/agent-pod-lab/prompts/father-prompt.md
+ExecStart=/usr/local/bin/claude \
+    --allowedTools "Read,Write,Glob,Grep,Bash,Agent" \
+    --disallowedTools "Edit,NotebookEdit,WebFetch,WebSearch,Bash(rm -rf *),Bash(sudo *),Bash(curl *),Bash(wget *),Bash(git push --force*),Bash(git reset --hard*)" \
+    --prompt-file /root/agent-pod-lab/prompts/father-prompt.md
 Restart=on-failure
 RestartSec=30
 EnvironmentFile=/root/agent-pod-lab/.env
