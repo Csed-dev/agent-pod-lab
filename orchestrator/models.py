@@ -96,7 +96,7 @@ class SchedulerConfig:
         )
 
 
-def load_experiments(path: str | Path, default_command: str = "cd {workspace} && uv run {script}") -> list[ExperimentSpec]:
+def load_experiments(path: str | Path, default_command: str = "cd {workspace} && uv run python {script}") -> list[ExperimentSpec]:
     with open(path) as f:
         data = yaml.safe_load(f)
 
