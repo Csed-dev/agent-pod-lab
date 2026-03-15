@@ -17,6 +17,7 @@ class TrainConfig:
     warmup_epochs: int = 20
     min_lr_ratio: float = 0.1
     checkpoint_path: str = "best_model.pt"
+    optimizer_class: str = "adam"  # "adam" or "adamw"
 
 
 @dataclass
@@ -28,7 +29,8 @@ class TrainResult:
 
 
 def train_loop(model, dataset, loss_fn, save_fn, config: TrainConfig) -> TrainResult:
-    optimizer = torch.optim.Adam(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
+    opt_cls = torch.optim.AdamW if config.optimizer_class == "adamw" else torch.optim.Adam
+    optimizer = opt_cls(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
     estimated_epochs = int(TIME_BUDGET / 2.0)
 
     def lr_lambda(epoch: int) -> float:

@@ -1,20 +1,9 @@
 <experiment>
-<description>
-Lower learning rate test. LR=5e-4 vs baseline LR=3e-4.
-Same architecture and domains as baseline.
-</description>
-
-<hypothesis>
-Slower convergence during training but potentially better final score.
-Lower LR may reduce overshooting and improve SuiteSparse performance.
-</hypothesis>
-
+<description>LR=5e-4 instead of baseline 3e-4. Higher learning rate for faster convergence.</description>
+<hypothesis>With only ~54 epochs at K=1024, higher LR might find better coefficients faster. Previous Run 27 (K=6, LR=5e-4) got 0.498 vs 0.482 — worse. But K=1024 Neumann init is much stronger.</hypothesis>
 <acceptance>
 - score <= 0.10
+- suitesparse_conv >= 80.0
 </acceptance>
-
-<context>
-Part of LR sweep (phase-1). Compare directly against baseline.
-If LR=5e-4 improves, try LR=2e-4 next.
-</context>
+<context>Simple hyperparameter sweep. Tests if the 3e-4 default is optimal for K=1024.</context>
 </experiment>

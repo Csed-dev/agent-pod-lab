@@ -1,4 +1,5 @@
 experiments:
+  # Phase 1: Baseline + variants
   - name: baseline
     script: experiments/baseline/train.py
     dependencies: []
@@ -8,3 +9,44 @@ experiments:
     script: experiments/lr-sweep-low/train.py
     dependencies: [baseline]
     tags: [lr-sweep, phase-1]
+
+  - name: no-gnn
+    script: experiments/no-gnn/train.py
+    dependencies: [baseline]
+    tags: [ablation, phase-1]
+
+  - name: sign-correction
+    script: experiments/sign-correction/train.py
+    dependencies: [baseline]
+    tags: [sign-fix, phase-1]
+
+  - name: omega-085
+    script: experiments/omega-085/train.py
+    dependencies: [baseline]
+    tags: [omega-sweep, phase-1]
+
+  - name: omega-095
+    script: experiments/omega-095/train.py
+    dependencies: [baseline]
+    tags: [omega-sweep, phase-1]
+
+  - name: k256-omega09
+    script: experiments/k256-omega09/train.py
+    dependencies: [baseline]
+    tags: [k-sweep, phase-1]
+
+  - name: gelu-activation
+    script: experiments/gelu-activation/train.py
+    dependencies: [baseline]
+    tags: [architecture, phase-1]
+
+  - name: adamw-optimizer
+    script: experiments/adamw-optimizer/train.py
+    dependencies: [baseline]
+    tags: [optimizer, phase-1]
+
+  # Phase 2: Combinations
+  - name: k512-sign-correction
+    script: experiments/k512-sign-correction/train.py
+    dependencies: [sign-correction]
+    tags: [sign-fix, k-sweep, phase-2]
