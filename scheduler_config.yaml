@@ -6,7 +6,7 @@ repo_url: "https://github.com/Csed-dev/agent-pod-lab.git"
 workspace_dir: "/workspace/agent-pod-lab"
 setup_command: "git clone https://github.com/Csed-dev/agent-pod-lab.git {workspace} && bash {workspace}/setup_pod.sh main"
 sync_command: "cd {workspace} && git fetch origin && git reset --hard origin/main"
-experiment_timeout: 1500
+experiment_timeout: 2400
 setup_timeout: 600
 pod_ready_timeout: 120
 log_dir: "logs"
