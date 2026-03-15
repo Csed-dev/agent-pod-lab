@@ -5,3 +5,5 @@ bind = "127.0.0.1:8000"
 workers = 1
 worker_class = "uvicorn.workers.UvicornWorker"
 accesslog = "-"
+graceful_timeout = 3
+timeout = 30
