@@ -1,4 +1,8 @@
+import os
+
+from dotenv import load_dotenv
 from fastapi import FastAPI, Request
+from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
 from api.routers import experiments, monitoring
@@ -10,7 +14,20 @@ from orchestrator.errors import (
     PodPoolFullError,
 )
 
+load_dotenv()
+
 app = FastAPI(title="Agent Pod Lab", version="0.1.0")
+
+cors_origins = os.environ.get("CORS_ORIGINS", "")
+if cors_origins:
+    app.add_middleware(
+        CORSMiddleware,
+        allow_origins=[o.strip() for o in cors_origins.split(",")],
+        allow_credentials=True,
+        allow_methods=["*"],
+        allow_headers=["*"],
+    )
+
 app.include_router(monitoring.router)
 app.include_router(experiments.router)
 
