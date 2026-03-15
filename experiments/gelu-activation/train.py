@@ -17,7 +17,7 @@ HIDDEN_DIM = 128
 POLY_DEGREE = 1024
 LR = 3e-4
 JACOBI_OMEGA = 0.9
-DOMAINS = "DIFFUSION,ELASTICITY,STOKES,DIFFUSION_ADVECTION,VARIABLE_DIFFUSION,SPECTRAL_STRESS,GRAPH_LAPLACIAN,ENHANCED_ADVECTION"
+DOMAINS = "diffusion,elasticity,stokes,diffusion_advection,variable_diffusion,spectral_stress,graph_laplacian,enhanced_advection"
 GRID_SIZES = (16, 24, 32, 48)
 
 t_start = time.time()
