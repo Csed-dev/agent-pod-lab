@@ -268,25 +268,17 @@ class ExperimentManager:
             price_per_hour = prices.get(state.gpu_type_used, 0.0)
             state.cost_usd = estimate_cost(price_per_hour, state.started_at, state.finished_at)
 
-        save_experiment_result(self._results_dir, state.run_id, state, output, metrics)
+        # Extract GPU utilization from metrics (peak_vram_mb) since nvidia-smi
+        # after training shows 0% (nothing running). The train.py scripts report
+        # peak_vram_mb via torch.cuda.max_memory_allocated().
+        if "peak_vram_mb" in metrics and metrics["peak_vram_mb"] > 0:
+            state.gpu_utilization_pct = metrics["peak_vram_mb"]
 
         if state.instance_id:
-            conn = self._get_or_reconnect(state.instance_id)
-            if conn:
-                try:
-                    gpu_util = self._compute.run_command(
-                        conn,
-                        "nvidia-smi --query-gpu=utilization.gpu --format=csv,noheader,nounits 2>/dev/null || echo -1",
-                        timeout=10,
-                    )
-                    util_val = float(gpu_util.strip())
-                    if util_val >= 0:
-                        state.gpu_utilization_pct = util_val
-                except Exception:
-                    pass
-
             self._compute.terminate_instance(state.instance_id)
             self._active_conns.pop(state.instance_id, None)
+
+        save_experiment_result(self._results_dir, state.run_id, state, output, metrics)
 
         self._sync_to_cloud(state.run_id, metrics)
 
