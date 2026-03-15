@@ -13,7 +13,7 @@ log_dir: "logs"
 results_dir: "results"
 poll_interval: 10
 
-smtp:
-  host: "smtp.gmail.com"
-  port: 587
-  to: "<your-email>"
+# smtp:
+#   host: "smtp.gmail.com"
+#   port: 587
+#   to: "<your-email>"
