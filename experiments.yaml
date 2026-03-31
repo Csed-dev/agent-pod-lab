@@ -45,6 +45,14 @@ experiments:
     dependencies: [baseline]
     tags: [optimizer, phase-1]
 
+  # Perturbation benchmark (CPU only, no GPU needed)
+  - name: perturbation-benchmark
+    script: experiments/perturbation-benchmark/train.py
+    dependencies: []
+    tags: [benchmark, perturbation, thesis]
+    gpu_type: "cpu3c-2-4"
+    timeout: 14400
+
   # Phase 2: Combinations
   - name: k512-sign-correction
     script: experiments/k512-sign-correction/train.py

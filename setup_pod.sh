@@ -32,6 +32,6 @@ uv run prepare.py
 
 echo "Verifying setup..."
 uv run python3 -c "import matrixpfn; print(f'matrixpfn {matrixpfn.__version__}')"
-nvidia-smi --query-gpu=name,memory.total --format=csv,noheader
+nvidia-smi --query-gpu=name,memory.total --format=csv,noheader 2>/dev/null || echo "No GPU detected (CPU pod)"
 
 echo "=== setup complete ==="

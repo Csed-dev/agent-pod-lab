@@ -27,11 +27,15 @@ class SmtpConfig:
         smtp = data.get("smtp")
         if not smtp:
             return None
+        user = os.environ.get("SMTP_USER")
+        password = os.environ.get("SMTP_PASSWORD")
+        if not user or not password:
+            return None
         return cls(
             host=smtp["host"],
             port=smtp["port"],
-            user=os.environ["SMTP_USER"],
-            password=os.environ["SMTP_PASSWORD"],
+            user=user,
+            password=password,
             to=smtp["to"],
         )
 

@@ -50,3 +50,11 @@ class ComputePort(Protocol):
     def build_exec_command(
         self, conn: Connection, command: str, timeout: int
     ) -> str: ...
+
+    def start_background_job(
+        self, conn: Connection, command: str, log_path: str, pid_path: str, exit_code_path: str
+    ) -> None: ...
+
+    def poll_job(
+        self, conn: Connection, pid_path: str, log_path: str, exit_code_path: str
+    ) -> tuple[bool, int | None, str]: ...

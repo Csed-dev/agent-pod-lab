@@ -11,6 +11,33 @@ POD_POLL_INTERVAL_S = 10
 SSH_CONNECT_TIMEOUT_S = 10
 
 
+def _ssh_base_args(conn: Connection) -> list[str]:
+    return [
+        "ssh",
+        "-o", "StrictHostKeyChecking=no",
+        "-o", f"ConnectTimeout={SSH_CONNECT_TIMEOUT_S}",
+        "-o", "ServerAliveInterval=30",
+        "-o", "ServerAliveCountMax=5",
+        "-p", str(conn.port),
+        f"root@{conn.ip}",
+    ]
+
+
+def _scp_base_args(conn: Connection) -> list[str]:
+    return [
+        "scp",
+        "-o", "StrictHostKeyChecking=no",
+        "-o", f"ConnectTimeout={SSH_CONNECT_TIMEOUT_S}",
+        "-o", "ServerAliveInterval=30",
+        "-o", "ServerAliveCountMax=5",
+        "-P", str(conn.port),
+    ]
+
+
+def _shell_quote(s: str) -> str:
+    return "'" + s.replace("'", "'\"'\"'") + "'"
+
+
 class RunPodCompute(ComputePort):
     def __init__(self) -> None:
         api_key = os.environ["RUNPOD_API_KEY"]
@@ -36,6 +63,9 @@ class RunPodCompute(ComputePort):
         deadline = time.monotonic() + POD_READY_TIMEOUT_S
         while time.monotonic() < deadline:
             pod = runpod.get_pod(instance_id)
+            if pod is None:
+                time.sleep(POD_POLL_INTERVAL_S)
+                continue
             runtime = pod.get("runtime") or {}
             ports = runtime.get("ports") or []
             for port_info in ports:
@@ -56,14 +86,7 @@ class RunPodCompute(ComputePort):
 
     def run_command(self, conn: Connection, command: str, timeout: int = 120) -> str:
         result = subprocess.run(
-            [
-                "ssh",
-                "-o", "StrictHostKeyChecking=no",
-                "-o", f"ConnectTimeout={SSH_CONNECT_TIMEOUT_S}",
-                "-p", str(conn.port),
-                f"root@{conn.ip}",
-                command,
-            ],
+            _ssh_base_args(conn) + [command],
             capture_output=True,
             text=True,
             timeout=timeout,
@@ -77,14 +100,7 @@ class RunPodCompute(ComputePort):
 
     def upload_file(self, conn: Connection, local_path: str, remote_path: str) -> None:
         result = subprocess.run(
-            [
-                "scp",
-                "-o", "StrictHostKeyChecking=no",
-                "-o", f"ConnectTimeout={SSH_CONNECT_TIMEOUT_S}",
-                "-P", str(conn.port),
-                local_path,
-                f"root@{conn.ip}:{remote_path}",
-            ],
+            _scp_base_args(conn) + [local_path, f"root@{conn.ip}:{remote_path}"],
             capture_output=True,
             text=True,
             timeout=30,
@@ -97,14 +113,7 @@ class RunPodCompute(ComputePort):
 
     def download_file(self, conn: Connection, remote_path: str, local_path: str) -> None:
         result = subprocess.run(
-            [
-                "scp",
-                "-o", "StrictHostKeyChecking=no",
-                "-o", f"ConnectTimeout={SSH_CONNECT_TIMEOUT_S}",
-                "-P", str(conn.port),
-                f"root@{conn.ip}:{remote_path}",
-                local_path,
-            ],
+            _scp_base_args(conn) + [f"root@{conn.ip}:{remote_path}", local_path],
             capture_output=True,
             text=True,
             timeout=60,
@@ -175,9 +184,37 @@ class RunPodCompute(ComputePort):
         inner = f"timeout {timeout} bash -c {_shell_quote(command)}"
         return (
             f"ssh -o StrictHostKeyChecking=no -o ConnectTimeout=10 "
+            f"-o ServerAliveInterval=30 -o ServerAliveCountMax=5 "
             f"-p {conn.port} root@{conn.ip} "
             f"{_shell_quote(inner)}"
         )
+
+    def start_background_job(
+        self, conn: Connection, command: str, log_path: str, pid_path: str, exit_code_path: str
+    ) -> None:
+        wrapper = (
+            f"nohup bash -c {_shell_quote(command + f'; echo $? > {exit_code_path}')} "
+            f"> {log_path} 2>&1 & echo $! > {pid_path}"
+        )
+        self.run_command(conn, wrapper, timeout=30)
+
+    def poll_job(
+        self, conn: Connection, pid_path: str, log_path: str, exit_code_path: str
+    ) -> tuple[bool, int | None, str]:
+        check_cmd = (
+            f"pid=$(cat {pid_path} 2>/dev/null || echo 0); "
+            f"if [ \"$pid\" -ne 0 ] && kill -0 \"$pid\" 2>/dev/null; then echo RUNNING; "
+            f"else cat {exit_code_path} 2>/dev/null || echo -1; fi; "
+            f"echo '---LOG---'; tail -50 {log_path} 2>/dev/null || true"
+        )
+        output = self.run_command(conn, check_cmd, timeout=30)
+        parts = output.split("---LOG---", 1)
+        status_line = parts[0].strip()
+        log_tail = parts[1].strip() if len(parts) > 1 else ""
+        if status_line == "RUNNING":
+            return False, None, log_tail
+        exit_code = int(status_line)
+        return True, exit_code, log_tail
 
     def _wait_ssh_ready(self, conn: Connection, retries: int = 10) -> None:
         for attempt in range(retries):
@@ -188,7 +225,3 @@ class RunPodCompute(ComputePort):
                 if attempt == retries - 1:
                     raise
                 time.sleep(5)
-
-
-def _shell_quote(s: str) -> str:
-    return "'" + s.replace("'", "'\"'\"'") + "'"

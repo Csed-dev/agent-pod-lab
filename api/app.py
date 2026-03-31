@@ -1,11 +1,10 @@
 import os
 
-from dotenv import load_dotenv
 from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 
-from api.routers import experiments, monitoring
+from api.routers import diagrams, experiments, monitoring
 from orchestrator.errors import (
     ExperimentNotFoundError,
     ExperimentNotReadyError,
@@ -14,22 +13,19 @@ from orchestrator.errors import (
     PodPoolFullError,
 )
 
-load_dotenv()
-
 app = FastAPI(title="Agent Pod Lab", version="0.1.0")
 
-cors_origins = os.environ.get("CORS_ORIGINS", "")
-if cors_origins:
-    app.add_middleware(
-        CORSMiddleware,
-        allow_origins=[o.strip() for o in cors_origins.split(",")],
-        allow_credentials=False,
-        allow_methods=["GET"],
-        allow_headers=["*"],
-    )
+allowed_origins = os.environ.get("CORS_ORIGINS", "").split(",")
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=[o.strip() for o in allowed_origins if o.strip()],
+    allow_methods=["GET"],
+    allow_headers=["*"],
+)
 
 app.include_router(monitoring.router)
 app.include_router(experiments.router)
+app.include_router(diagrams.router)
 
 
 @app.exception_handler(ExperimentNotFoundError)
