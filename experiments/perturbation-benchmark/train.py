@@ -1,4 +1,6 @@
 import json
+import os
+import sys
 import time
 import warnings
 from pathlib import Path
@@ -8,11 +10,25 @@ from scipy import sparse
 from scipy.sparse.linalg import gmres, spilu, LinearOperator
 
 warnings.filterwarnings("ignore", category=sparse.SparseEfficiencyWarning)
+warnings.filterwarnings("ignore", category=DeprecationWarning)
 
-SEED_BASE = 42
-N_SEEDS = 30
-EPSILON_VALUES = [0.0, 0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0]
-GRIDS = [(5, 5), (10, 10), (50, 50), (100, 100)]
+PROFILE = os.environ.get("PROFILE", "full")
+
+if PROFILE == "smoke":
+    SEED_BASE = 42
+    N_SEEDS = 3
+    EPSILON_VALUES = [0.0, 0.5, 2.0]
+    GRIDS = [(3, 3)]
+elif PROFILE == "small":
+    SEED_BASE = 42
+    N_SEEDS = 10
+    EPSILON_VALUES = [0.0, 0.1, 0.5, 1.0, 2.0]
+    GRIDS = [(5, 5), (10, 10)]
+else:
+    SEED_BASE = 42
+    N_SEEDS = 30
+    EPSILON_VALUES = [0.0, 0.01, 0.05, 0.1, 0.25, 0.5, 1.0, 2.0]
+    GRIDS = [(5, 5), (10, 10), (50, 50), (100, 100)]
 OMEGA = 0.9
 K_MAX = 256
 NEUMANN_TOL = 1e-10
@@ -171,9 +187,22 @@ SOLVERS = {
 }
 
 
+def flush(*args, **kwargs):
+    print(*args, **kwargs, flush=True)
+
+
+def save_intermediate(all_results, results_dir):
+    results_dir.mkdir(exist_ok=True)
+    with open(results_dir / "all_results.json", "w") as f:
+        json.dump(all_results, f, indent=2, default=str)
+
+
 def main():
+    flush(f"PROFILE={PROFILE} GRIDS={GRIDS} EPS={EPSILON_VALUES} SEEDS={N_SEEDS}")
+
     t_start = time.monotonic()
     all_results = []
+    results_dir = Path("results_perturbation")
     total_configs = len(GRIDS) * len(EPSILON_VALUES) * N_SEEDS * len(SOLVERS)
     completed = 0
 
@@ -189,7 +218,7 @@ def main():
         for j in range(grid_cols):
             b[j] = 100.0
 
-        print(f"\n=== Grid {grid_label} (n={n}) ===")
+        flush(f"\n=== Grid {grid_label} (n={n}) ===")
 
         for eps in EPSILON_VALUES:
             for seed_idx in range(N_SEEDS):
@@ -233,14 +262,11 @@ def main():
                     completed += 1
 
             done_pct = completed / total_configs * 100
-            print(f"  eps={eps:.2f}: {completed}/{total_configs} ({done_pct:.0f}%)")
+            flush(f"  eps={eps:.2f}: {completed}/{total_configs} ({done_pct:.0f}%)")
+            save_intermediate(all_results, results_dir)
 
     t_total = time.monotonic() - t_start
-
-    results_dir = Path("results_perturbation")
-    results_dir.mkdir(exist_ok=True)
-    with open(results_dir / "all_results.json", "w") as f:
-        json.dump(all_results, f, indent=2, default=str)
+    save_intermediate(all_results, results_dir)
 
     print(f"\n{'='*60}")
     print(f"SUMMARY")
