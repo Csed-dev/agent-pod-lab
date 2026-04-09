@@ -64,3 +64,9 @@ experiments:
     script: experiments/v3-gcn-capacity/train.py
     dependencies: []
     tags: [architecture, v3, gcn, phase-3]
+
+  # v3-GCN no-GNN Ablation: feste c_k=1, kein Training
+  - name: v3-gcn-no-gnn
+    script: experiments/v3-gcn-no-gnn/train.py
+    dependencies: []
+    tags: [ablation, v3, gcn, phase-3]
