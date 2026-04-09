@@ -58,3 +58,9 @@ experiments:
     script: experiments/k512-sign-correction/train.py
     dependencies: [sign-correction]
     tags: [sign-fix, k-sweep, phase-2]
+
+  # v3-Architektur (GCN-Backbone) aus ADR-13 des Thesis-Repos
+  - name: v3-gcn-capacity
+    script: experiments/v3-gcn-capacity/train.py
+    dependencies: []
+    tags: [architecture, v3, gcn, phase-3]

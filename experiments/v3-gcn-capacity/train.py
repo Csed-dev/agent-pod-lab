@@ -1,0 +1,93 @@
+"""v3-GCN-Capacity: PolyGCN mit hoher Kapazitaet auf vollem Trainings-Prior.
+
+Aus ADR-13 (MatrixPFN-Thesis-Repo) portiert. Testet die offene Frage:
+Ist die OOD-Schwaeche von v3 (siehe v3-overview.pdf) parametrisch
+(zu wenig Modell-Kapazitaet) oder strukturell (Backbone/Output)?
+
+Architektur: PolyGCN mit 4 Schichten, embed=64, hidden=128, K=1024.
+Identische Trainings-Pipeline wie baseline (PolyMPNN).
+Erwartete Parameter: ~140k.
+"""
+import time
+import random
+
+import numpy as np
+import torch
+
+from lib.architectures.poly_gcn import (
+    PolyGCN, PolynomialPreconditioner, poly_frobenius_loss,
+    save_checkpoint, load_checkpoint,
+)
+from lib.training import TrainConfig, train_loop
+from lib.evaluation import run_evaluation, print_results
+from lib.data import build_dataset
+
+SEED = 42
+NUM_LAYERS = 4
+EMBED_DIM = 64
+HIDDEN_DIM = 128
+POLY_DEGREE = 1024
+LR = 3e-4
+JACOBI_OMEGA = 0.9
+DOMAINS = "diffusion,elasticity,stokes,diffusion_advection,variable_diffusion,spectral_stress,graph_laplacian,enhanced_advection"
+GRID_SIZES = (16, 24, 32, 48)
+
+t_start = time.time()
+
+random.seed(SEED)
+np.random.seed(SEED)
+torch.manual_seed(SEED)
+if torch.cuda.is_available():
+    torch.cuda.manual_seed(SEED)
+
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+print(f"Device: {device}")
+if device.type == "cuda":
+    print(f"GPU: {torch.cuda.get_device_name()}")
+    print(f"VRAM: {torch.cuda.get_device_properties(0).total_memory / 1e9:.1f} GB")
+
+dataset, num_domains = build_dataset(DOMAINS.split(","), GRID_SIZES, device)
+
+model = PolyGCN(
+    num_layers=NUM_LAYERS,
+    embed=EMBED_DIM,
+    hidden=HIDDEN_DIM,
+    poly_degree=POLY_DEGREE,
+).to(device)
+
+num_params = sum(p.numel() for p in model.parameters() if p.requires_grad)
+print(f"Model: PolyGCN ({num_params:,} params)")
+print(f"  layers={NUM_LAYERS}, embed={EMBED_DIM}, hidden={HIDDEN_DIM}, poly_degree={POLY_DEGREE}")
+
+
+def loss_fn(mdl, A, num_probes):
+    mdl.set_matrix(A)
+    coeffs = mdl()
+    return poly_frobenius_loss(A, coeffs, mdl.D_inv_A, mdl.D_inv, num_probes, omega=JACOBI_OMEGA)
+
+
+train_result = train_loop(model, dataset, loss_fn, save_checkpoint, TrainConfig(lr=LR))
+
+print(f"\nTraining done: {train_result.num_epochs} epochs in {train_result.training_seconds:.1f}s")
+print(f"Best loss: {train_result.best_loss:.4e}")
+
+print("\nEvaluating...")
+t_eval_start = time.time()
+eval_model = load_checkpoint(train_result.checkpoint_path, device)
+
+
+def build_preconditioner(mdl, A):
+    mdl.set_matrix(A)
+    coeffs = mdl()
+    return PolynomialPreconditioner(coeffs, mdl.D_inv_A, mdl.D_inv, omega=JACOBI_OMEGA)
+
+
+results = run_evaluation(eval_model, build_preconditioner, device)
+t_end = time.time()
+peak_vram_mb = torch.cuda.max_memory_allocated() / 1024 / 1024 if device.type == "cuda" else 0
+
+print_results(
+    results, num_params, train_result.num_epochs,
+    train_result.training_seconds, t_end - t_start,
+    peak_vram_mb, num_domains, train_result.best_loss,
+)
